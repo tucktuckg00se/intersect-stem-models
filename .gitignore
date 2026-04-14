@@ -1,0 +1,11 @@
+.codex
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.venv-sp/
+build/
+dist/
+artifacts/cache/
+artifacts/exports/
+artifacts/sources/

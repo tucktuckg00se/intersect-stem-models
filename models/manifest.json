@@ -1,0 +1,82 @@
+{
+  "models": [
+    {
+      "model_id": "bs-roformer-sw-6stem",
+      "name": "BS RoFormer SW by jarredou",
+      "architecture": "bs_roformer",
+      "upstream": {
+        "source_repo": "https://github.com/openmirlab/bs-roformer-infer",
+        "config_url": "https://huggingface.co/jarredou/BS-ROFO-SW-Fixed/resolve/main/BS-Rofo-SW-Fixed.yaml",
+        "checkpoint_url": "https://huggingface.co/jarredou/BS-ROFO-SW-Fixed/resolve/main/BS-Rofo-SW-Fixed.ckpt"
+      },
+      "runtime": {
+        "engine": "onnxruntime",
+        "input_name": "audio",
+        "output_name": "stems",
+        "sample_rate_hz": 44100,
+        "channels": 2,
+        "stems": [
+          "vocals",
+          "drums",
+          "bass",
+          "guitar",
+          "piano",
+          "other"
+        ],
+        "chunk_size_samples": 131072,
+        "recommended_overlap_ratio": 0.5
+      },
+      "artifacts": {
+        "source_config_path": "artifacts/sources/bs-roformer-sw-6stem/source/BS-Rofo-SW-Fixed.yaml",
+        "source_checkpoint_path": "artifacts/sources/bs-roformer-sw-6stem/source/BS-Rofo-SW-Fixed.ckpt",
+        "onnx_path": null,
+        "release_asset_name": "bs_roformer_sw_6stem.onnx",
+        "release_asset_url": null,
+        "sha256": {
+          "config": "f9fada9f94e5ba2d2e4600196299459294bc5f532b314c209cc156ac63e4329b",
+          "checkpoint": "24e7d35ee9c64415673d3fd33e06a67cac2c103c5df6267ba1576459c775916e",
+          "onnx": null
+        },
+        "waveform_full": {
+          "available": false,
+          "onnx_path": null,
+          "input_name": "audio",
+          "output_name": "stems",
+          "input_shape": [
+            1,
+            2,
+            131072
+          ],
+          "output_shape": [
+            1,
+            6,
+            2,
+            131072
+          ],
+          "sha256": null,
+          "failure_report_path": "artifacts/exports/bs-roformer-sw-6stem/waveform-export-failure.json"
+        },
+        "spectral_core": {
+          "available": true,
+          "onnx_path": "artifacts/exports/bs-roformer-sw-6stem/bs_roformer_sw_6stem_spectral_core.onnx",
+          "input_name": "spectrum",
+          "output_name": "masked_stems",
+          "input_shape": [
+            1,
+            2050,
+            257,
+            2
+          ],
+          "output_shape": [
+            1,
+            6,
+            2050,
+            257,
+            2
+          ],
+          "sha256": "6b9f1cf03097d516de309e041a51d0931ee6e03c385ed35d1eb6cba53f0840f5"
+        }
+      }
+    }
+  ]
+}
