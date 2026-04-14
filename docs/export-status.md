@@ -35,8 +35,8 @@ The current environment reproduced two distinct export failures:
 
 1. PyTorch dynamo exporter failure during graph decomposition
    - error: `expected compiled_fn to be GraphModule, got <class 'function'>`
-2. Legacy exporter failure on STFT lowering
-   - error: `STFT does not currently support complex types`
+2. Legacy exporter failure on waveform reconstruction lowering
+   - error: `Exporting the operator 'aten::view_as_complex' to ONNX opset version 18 is not supported`
 
 These failures are limited to the **waveform-full** export path. The separator core itself is now exportable.
 
@@ -44,8 +44,8 @@ These failures are limited to the **waveform-full** export path. The separator c
 
 The repo now has a usable fallback artifact for plugin integration, but full waveform export still needs an ONNX-native spectral path:
 
-- ONNX-native STFT
 - complex-mask handling in ONNX-compatible real-valued tensors
+- replacement for `view_as_complex` on the waveform path
 - ONNX-native inverse-STFT reconstruction
 
 Once that path exists, the existing export and validation scaffolding can be reused to promote the waveform-full artifact to the primary distribution target.

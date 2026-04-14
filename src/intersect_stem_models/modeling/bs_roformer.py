@@ -344,9 +344,8 @@ class BSRoformer(Module):
             raw_audio,
             **self.stft_kwargs,
             window=stft_window,
-            return_complex=True,
+            return_complex=False,
         )
-        stft_repr = torch.view_as_real(stft_repr)
         stft_repr = unpack_one(stft_repr, batch_audio_channel_packed_shape, "* f t c")
         stft_repr = stft_repr[:, :, self.freq_slice]
         return rearrange(stft_repr, "b s f t c -> b (f s) t c")
