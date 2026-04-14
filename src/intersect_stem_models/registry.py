@@ -27,7 +27,7 @@ MODEL_SPECS: dict[str, ModelSpec] = {
         model_id=DEFAULT_MODEL_ID,
         name="BS RoFormer SW by jarredou",
         architecture="bs_roformer",
-        stems=("vocals", "drums", "bass", "guitar", "piano", "other"),
+        stems=("bass", "drums", "other", "vocals", "guitar", "piano"),
         sample_rate=44100,
         channels=2,
         source_config_url="https://huggingface.co/jarredou/BS-ROFO-SW-Fixed/resolve/main/BS-Rofo-SW-Fixed.yaml",
@@ -45,4 +45,3 @@ def get_model_spec(model_id: str = DEFAULT_MODEL_ID) -> ModelSpec:
         return MODEL_SPECS[model_id]
     except KeyError as exc:
         raise KeyError(f"Unknown model id: {model_id}") from exc
-

@@ -16,12 +16,12 @@
         "sample_rate_hz": 44100,
         "channels": 2,
         "stems": [
-          "vocals",
-          "drums",
           "bass",
+          "drums",
+          "other",
+          "vocals",
           "guitar",
-          "piano",
-          "other"
+          "piano"
         ],
         "chunk_size_samples": 131072,
         "recommended_overlap_ratio": 0.5

@@ -18,7 +18,7 @@ Current fallback contract:
 - Output tensor name: `masked_stems`
 - Output tensor shape: `[1, 6, 2050, 257, 2]`
 - Tensor layout: real-valued complex pairs in the last dimension
-- Stem order: `vocals, drums, bass, guitar, piano, other`
+- Stem order: `bass, drums, other, vocals, guitar, piano`
 - Native sample rate: `44.1 kHz`
 - Default deployment chunk size: `131072` samples
 
@@ -38,7 +38,6 @@ Recommended chunk aggregation:
 - Use `50%` overlap between adjacent chunks
 - Use a Hann window for overlap-add
 - Keep chunk boundaries aligned in samples, not in musical time
-- If the host needs a 4-stem view, fold down with `other_4stem = guitar + piano + other`
 
 ## Session setup
 
