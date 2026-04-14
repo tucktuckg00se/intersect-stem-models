@@ -96,6 +96,7 @@ def export_default_model(
         opset=opset,
     )
 
+    waveform_failure_path = export_root / "waveform-export-failure.json"
     summary = ExportSummary(
         model_id=model_id,
         config_path=str(config_path),
@@ -104,7 +105,7 @@ def export_default_model(
         checkpoint_sha256=checkpoint_sha256,
         waveform_artifact=waveform_artifact,
         spectral_core_artifact=spectral_core_artifact,
-        waveform_failure_path=str(export_root / "waveform-export-failure.json"),
+        waveform_failure_path=str(waveform_failure_path) if waveform_artifact is None else None,
         training_chunk_size=training_chunk_size,
         export_chunk_size=chunk_size,
     )
@@ -123,6 +124,7 @@ def _try_export_waveform_artifact(
     training_chunk_size: int,
 ) -> ArtifactExportResult | None:
     onnx_path = export_root / spec.export_filename
+    failure_report_path = export_root / "waveform-export-failure.json"
     dummy = torch.randn(1, spec.channels, chunk_size, dtype=torch.float32)
     waveform_model = build_waveform_wrapper(model)
     try:
@@ -137,6 +139,8 @@ def _try_export_waveform_artifact(
             )
         onnx_model = onnx.load(onnx_path)
         onnx.checker.check_model(onnx_model)
+        if failure_report_path.exists():
+            failure_report_path.unlink()
         return ArtifactExportResult(
             artifact_kind="waveform_full",
             onnx_path=str(onnx_path),
@@ -148,7 +152,7 @@ def _try_export_waveform_artifact(
         )
     except Exception as exc:
         _write_failure_report(
-            export_root / "waveform-export-failure.json",
+            failure_report_path,
             spec=spec,
             training_chunk_size=training_chunk_size,
             export_chunk_size=chunk_size,

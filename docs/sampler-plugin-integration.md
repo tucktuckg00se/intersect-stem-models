@@ -2,7 +2,7 @@
 
 ## Runtime contract
 
-The default packaged model is **BS RoFormer SW by jarredou**. The long-term target remains a waveform-facing ONNX model, but the repo currently ships a validated **spectral-core fallback artifact** for plain ONNX Runtime.
+The default packaged model is **BS RoFormer SW by jarredou**. The repo now ships a validated **waveform-facing ONNX model** for plain ONNX Runtime.
 
 Primary target contract:
 
@@ -51,6 +51,26 @@ Recommended session settings:
 - Reuse the same `InferenceSession` across calls
 - Reuse preallocated host buffers where practical
 
+## Optional spectral-core fallback
+
+The repo also exports a lower-level spectral-core artifact:
+
+- Input tensor name: `spectrum`
+- Input tensor shape: `[1, 2050, 257, 2]`
+- Output tensor name: `masked_stems`
+- Output tensor shape: `[1, 6, 2050, 257, 2]`
+- Tensor layout: real-valued complex pairs in the last dimension
+
+Only use this path if the plugin wants to own STFT and inverse-STFT itself. For normal integration, use the waveform artifact.
+
+If the plugin consumes the spectral-core artifact, it must implement the same STFT and inverse-STFT settings as the model config:
+
+- `n_fft = 2048`
+- `hop_length = 441`
+- `win_length = 2048`
+- Hann window
+- stereo frequency packing into `2050 = 1025 * 2` bins
+
 ## Artifact flow
 
 Repo-local source assets:
@@ -73,16 +93,15 @@ Release distribution:
 
 The upstream training config uses a much larger chunk size than is practical for direct ONNX export on modest machines. The exporter therefore defaults to a smaller deployment chunk size of `131072` samples.
 
-At the moment:
+Current repo state:
 
-- the **spectral-core artifact** exports and validates successfully,
-- the **waveform-full artifact** still fails on the STFT/ISTFT path in plain ONNX export,
-- the manifest records both the working fallback and the waveform export failure report.
+- the **waveform-full artifact** exports and validates successfully,
+- the **spectral-core artifact** also exports and validates successfully,
+- `models/manifest.json` records both artifacts and exposes the waveform model as the primary ONNX payload.
 
-If the plugin consumes the spectral-core artifact, it must implement the same STFT and inverse-STFT settings as the model config:
+Recommended integration path:
 
-- `n_fft = 2048`
-- `hop_length = 441`
-- `win_length = 2048`
-- Hann window
-- stereo frequency packing into `2050 = 1025 * 2` bins
+- read `models/manifest.json`
+- download `artifacts.release_asset_url` once release assets are published
+- verify the ONNX SHA256 from the manifest
+- run inference against the waveform contract above

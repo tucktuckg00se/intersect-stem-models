@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from functools import partial
 
 import torch
-from torch import Tensor, einsum, nn, tensor
+from torch import Tensor, einsum, nn
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 
@@ -296,6 +297,7 @@ class BSRoformer(Module):
             win_length=stft_win_length,
             normalized=stft_normalized,
         )
+        self.stft_center = True
         self.stft_window_fn = partial(default(stft_window_fn, torch.hann_window), stft_win_length)
         freqs = torch.stft(torch.randn(1, 4096), **self.stft_kwargs, return_complex=True).shape[1]
         freq_range = default(freq_range, (-1, -1))
@@ -331,6 +333,42 @@ class BSRoformer(Module):
             hop_length=multi_stft_hop_size,
             normalized=multi_stft_normalized,
         )
+        full_freq_bins = self.stft_kwargs["n_fft"] // 2 + 1
+        self.register_buffer(
+            "inverse_dft_cos",
+            self._build_inverse_dft_basis(self.stft_kwargs["n_fft"], imag=False),
+            persistent=False,
+        )
+        self.register_buffer(
+            "inverse_dft_sin",
+            self._build_inverse_dft_basis(self.stft_kwargs["n_fft"], imag=True),
+            persistent=False,
+        )
+        scale_real = torch.full((full_freq_bins,), 2.0)
+        scale_imag = torch.full((full_freq_bins,), 2.0)
+        scale_real[0] = 1.0
+        scale_imag[0] = 0.0
+        if self.stft_kwargs["n_fft"] % 2 == 0:
+            scale_real[-1] = 1.0
+            scale_imag[-1] = 0.0
+        self.register_buffer("inverse_scale_real", scale_real, persistent=False)
+        self.register_buffer("inverse_scale_imag", scale_imag, persistent=False)
+        overlap_kernel = torch.zeros(
+            self.stft_kwargs["win_length"],
+            1,
+            self.stft_kwargs["win_length"],
+        )
+        diag = torch.arange(self.stft_kwargs["win_length"])
+        overlap_kernel[diag, 0, diag] = 1.0
+        self.register_buffer("overlap_add_kernel", overlap_kernel, persistent=False)
+
+    @staticmethod
+    def _build_inverse_dft_basis(n_fft: int, *, imag: bool) -> torch.Tensor:
+        freq_bins = n_fft // 2 + 1
+        n = torch.arange(n_fft, dtype=torch.float32).unsqueeze(0)
+        k = torch.arange(freq_bins, dtype=torch.float32).unsqueeze(1)
+        angle = 2 * math.pi * k * n / n_fft
+        return torch.sin(angle) if imag else torch.cos(angle)
 
     def waveform_to_spectrum(self, raw_audio: torch.Tensor) -> torch.Tensor:
         device = raw_audio.device
@@ -379,23 +417,62 @@ class BSRoformer(Module):
         out_imag = stft_real * mask_imag + stft_imag * mask_real
         return torch.stack((out_real, out_imag), dim=-1)
 
-    def spectrum_to_waveform(self, masked_stft_repr: torch.Tensor) -> torch.Tensor:
+    def spectrum_to_waveform(
+        self,
+        masked_stft_repr: torch.Tensor,
+        *,
+        expected_length: int | None = None,
+    ) -> torch.Tensor:
         device = masked_stft_repr.device
         num_stems = masked_stft_repr.shape[1]
         stft_repr = rearrange(masked_stft_repr, "b n (f s) t c -> (b n s) f t c", s=self.audio_channels)
         if any(self.freq_pad):
             pad_left, pad_right = self.freq_pad
             stft_repr = F.pad(stft_repr, (0, 0, 0, 0, pad_left, pad_right))
-        stft_repr = torch.view_as_complex(stft_repr.contiguous())
         if self.zero_dc:
-            stft_repr = stft_repr.index_fill(1, tensor(0, device=device), 0.0)
+            stft_repr[:, 0] = 0.0
         stft_window = self.stft_window_fn(device=device)
-        recon_audio = torch.istft(
-            stft_repr,
-            **self.stft_kwargs,
-            window=stft_window,
-            return_complex=False,
+        real = stft_repr[..., 0].permute(0, 2, 1)
+        imag = stft_repr[..., 1].permute(0, 2, 1)
+        cos_basis = self.inverse_dft_cos.to(device=device, dtype=stft_repr.dtype)
+        sin_basis = self.inverse_dft_sin.to(device=device, dtype=stft_repr.dtype)
+        scale_real = self.inverse_scale_real.to(device=device, dtype=stft_repr.dtype)
+        scale_imag = self.inverse_scale_imag.to(device=device, dtype=stft_repr.dtype)
+
+        frames = (
+            (real * scale_real) @ cos_basis - (imag * scale_imag) @ sin_basis
+        ) / self.stft_kwargs["n_fft"]
+        frames = frames * stft_window
+
+        frame_count = frames.shape[1]
+        overlap_length = (
+            self.stft_kwargs["win_length"]
+            + self.stft_kwargs["hop_length"] * (frame_count - 1)
         )
+
+        cols = frames.permute(0, 2, 1)
+        overlap_kernel = self.overlap_add_kernel.to(device=device, dtype=stft_repr.dtype)
+        recon_audio = F.conv_transpose1d(
+            cols,
+            overlap_kernel,
+            stride=self.stft_kwargs["hop_length"],
+        ).squeeze(1)
+
+        envelope_cols = (
+            stft_window.square()
+            .view(1, self.stft_kwargs["win_length"], 1)
+            .expand(1, self.stft_kwargs["win_length"], frame_count)
+        )
+        envelope = F.conv_transpose1d(
+            envelope_cols,
+            overlap_kernel,
+            stride=self.stft_kwargs["hop_length"],
+        ).squeeze(1)
+        recon_audio = recon_audio / envelope.clamp_min(1e-8)
+
+        if expected_length is not None and self.stft_center:
+            trim_start = self.stft_kwargs["n_fft"] // 2
+            recon_audio = recon_audio[:, trim_start:trim_start + expected_length]
         recon_audio = rearrange(
             recon_audio,
             "(b n s) t -> b n s t",
@@ -410,7 +487,10 @@ class BSRoformer(Module):
         stft_repr = self.waveform_to_spectrum(raw_audio)
         mask_logits = self.separator_core(stft_repr)
         masked_stft_repr = self.apply_masks(stft_repr, mask_logits)
-        recon_audio = self.spectrum_to_waveform(masked_stft_repr)
+        recon_audio = self.spectrum_to_waveform(
+            masked_stft_repr,
+            expected_length=raw_audio.shape[-1],
+        )
         if not exists(target):
             return recon_audio
         if self.num_stems > 1:

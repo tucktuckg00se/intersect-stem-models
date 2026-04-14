@@ -7,13 +7,30 @@ The repo can now:
 - download the pinned upstream BS RoFormer SW config and checkpoint,
 - construct the PyTorch model locally,
 - refactor the model into waveform frontend, separator core, and waveform backend stages,
+- export a working **waveform-full ONNX** artifact,
 - export a working **spectral-core ONNX** artifact,
-- validate the spectral-core artifact against PyTorch output,
-- persist export metadata and waveform failure diagnostics under `artifacts/exports/bs-roformer-sw-6stem/`.
+- validate both artifacts against PyTorch output,
+- persist export metadata under `artifacts/exports/bs-roformer-sw-6stem/`.
 
 ## Working artifact
 
-The current shippable artifact is:
+The primary shippable artifact is:
+
+- `artifacts/exports/bs-roformer-sw-6stem/bs_roformer_sw_6stem.onnx`
+
+Waveform contract:
+
+- input name: `audio`
+- input shape: `[1, 2, 131072]`
+- output name: `stems`
+- output shape: `[1, 6, 2, 131072]`
+
+Waveform parity result:
+
+- max absolute error: `2.0265579223632812e-06`
+- mean absolute error: `5.373570743927303e-08`
+
+The secondary diagnostic artifact is:
 
 - `artifacts/exports/bs-roformer-sw-6stem/bs_roformer_sw_6stem_spectral_core.onnx`
 
@@ -29,23 +46,20 @@ Current parity result:
 - max absolute error: `5.7220458984375e-05`
 - mean absolute error: `6.69371445383149e-07`
 
-## Confirmed blockers
+## What changed
 
-The current environment reproduced two distinct export failures:
+The original waveform export blockers were removed by replacing the waveform reconstruction path with ONNX-exportable real-valued operations:
 
-1. PyTorch dynamo exporter failure during graph decomposition
-   - error: `expected compiled_fn to be GraphModule, got <class 'function'>`
-2. Legacy exporter failure on waveform reconstruction lowering
-   - error: `Exporting the operator 'aten::view_as_complex' to ONNX opset version 18 is not supported`
+- STFT export now uses real-valued output tensors instead of `view_as_real(view_as_complex(...))`
+- Mask application stays in explicit real/imag tensor form
+- Inverse STFT reconstruction uses precomputed inverse-DFT bases plus overlap-add via `conv_transpose1d`
 
-These failures are limited to the **waveform-full** export path. The separator core itself is now exportable.
+This keeps the separator behavior intact while avoiding unsupported complex-valued lowering in plain ONNX export.
 
 ## Practical implication
 
-The repo now has a usable fallback artifact for plugin integration, but full waveform export still needs an ONNX-native spectral path:
+The repo now has a plugin-ready waveform model for ONNX Runtime on CPU or GPU across macOS, Windows, and Linux.
 
-- complex-mask handling in ONNX-compatible real-valued tensors
-- replacement for `view_as_complex` on the waveform path
-- ONNX-native inverse-STFT reconstruction
+The spectral-core artifact is still useful as a lower-level debugging or integration fallback, but it is no longer the primary deployment target.
 
-Once that path exists, the existing export and validation scaffolding can be reused to promote the waveform-full artifact to the primary distribution target.
+One remaining implementation risk is future PyTorch removal of `torch.stft(..., return_complex=False)`. If that lands before export support improves, the frontend may need the same kind of explicit real-valued decomposition now used in the inverse path.
