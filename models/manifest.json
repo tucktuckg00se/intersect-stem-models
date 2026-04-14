@@ -31,7 +31,7 @@
         "source_checkpoint_path": "artifacts/sources/bs-roformer-sw-6stem/source/BS-Rofo-SW-Fixed.ckpt",
         "onnx_path": "artifacts/exports/bs-roformer-sw-6stem/bs_roformer_sw_6stem.onnx",
         "release_asset_name": "bs_roformer_sw_6stem.onnx",
-        "release_asset_url": null,
+        "release_asset_url": "https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.1.0/bs_roformer_sw_6stem.onnx",
         "sha256": {
           "config": "f9fada9f94e5ba2d2e4600196299459294bc5f532b314c209cc156ac63e4329b",
           "checkpoint": "24e7d35ee9c64415673d3fd33e06a67cac2c103c5df6267ba1576459c775916e",
