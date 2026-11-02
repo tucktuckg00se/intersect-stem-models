@@ -1,0 +1,57 @@
+Third-party licenses for the models distributed in intersect-stem-models releases
+==================================================================================
+
+The ONNX files attached to this repository's releases are exports or modified
+copies of models by other authors. Each is distributed under the MIT License
+below, with the copyright notice of its authors.
+
+  File                              Release  Authors / source
+  --------------------------------  -------  ---------------------------------------------
+  bs_roformer_sw_6stem.onnx         v0.1.0   BS-RoFormer SW weights by jarredou
+                                             (huggingface.co/jarredou/BS-ROFO-SW-Fixed),
+                                             exported to ONNX by intersect-stem-models.
+  mvsep_mega_53.onnx                v0.2.0   MVSep Mega 53 by Roman Solovyev (ZFTurbo) / MVSep
+                                             (github.com/ZFTurbo/Music-Source-Separation-Training;
+                                             weights released under MIT in issue #245),
+                                             exported to ONNX by intersect-stem-models.
+  scnet_int8_dml.onnx               v0.2.1   SCNet by starrytong (github.com/starrytong/SCNet);
+                                             ONNX export by audiojs (huggingface.co/audiojs/scnet);
+                                             modified by intersect-stem-models for DirectML
+                                             (scripts/patch_onnx_for_directml.py).
+  mini_bs_roformer_v25_dml.onnx     v0.2.1   Mini-BS-RoFormer V2.5 by HiDolen
+                                             (huggingface.co/HiDolen/Mini-BS-RoFormer-V2.5-46.2M,
+                                             declared MIT on its model card); modified by
+                                             intersect-stem-models for DirectML
+                                             (scripts/patch_onnx_for_directml.py).
+
+Copyright notices
+-----------------
+
+  bs_roformer_sw_6stem.onnx      Copyright (c) jarredou
+  mvsep_mega_53.onnx             Copyright (c) 2024 Roman Solovyev (ZFTurbo)
+  scnet_int8_dml.onnx            Copyright (c) 2024 starrytong
+  mini_bs_roformer_v25_dml.onnx  Copyright (c) HiDolen
+
+ZFTurbo notes in issue #245 that he does not hold the copyright to all of the
+audio the Mega 53 model was trained on.
+
+MIT License
+-----------
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
