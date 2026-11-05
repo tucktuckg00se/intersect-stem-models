@@ -23,6 +23,12 @@ below, with the copyright notice of its authors.
                                              declared MIT on its model card); modified by
                                              intersect-stem-models for DirectML
                                              (scripts/patch_onnx_for_directml.py).
+  bs_roformer_sw_6stem_dml.onnx     v0.2.2   bs_roformer_sw_6stem.onnx (above), modified by
+                                             intersect-stem-models for DirectML
+                                             (scripts/patch_onnx_for_directml.py).
+  mini_bs_roformer_v25_dml2.onnx    v0.2.2   Mini-BS-RoFormer V2.5 by HiDolen (as above),
+                                             modified by intersect-stem-models for DirectML
+                                             (scripts/patch_onnx_for_directml.py).
 
 Copyright notices
 -----------------
@@ -31,6 +37,8 @@ Copyright notices
   mvsep_mega_53.onnx             Copyright (c) 2024 Roman Solovyev (ZFTurbo)
   scnet_int8_dml.onnx            Copyright (c) 2024 starrytong
   mini_bs_roformer_v25_dml.onnx  Copyright (c) HiDolen
+  bs_roformer_sw_6stem_dml.onnx  Copyright (c) jarredou
+  mini_bs_roformer_v25_dml2.onnx Copyright (c) HiDolen
 
 ZFTurbo notes in issue #245 that he does not hold the copyright to all of the
 audio the Mega 53 model was trained on.

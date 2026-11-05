@@ -88,6 +88,47 @@ Release distribution:
 - Copy the release URL and SHA256 into `models/manifest.json`
 - Plugin-side download logic should trust the manifest, not hard-coded URLs
 
+## Release series
+
+INTERSECT follows a release series, not a single tag. INTERSECT 0.18.1 and later read the manifest from the newest non-draft, non-prerelease release tagged `v0.2.N`. They find it through the GitHub releases API, and fall back to the tag built into the plugin. A patch release therefore reaches every plugin in the series without a plugin update. The plugin only fetches the manifest by itself; model files download when the user clicks.
+
+Rules for a patch release (`v0.2.N`):
+
+- Attach the complete `intersect_stem_models_manifest.json`, listing every model, including ones whose files live in older releases.
+- Never rename a `model_id`. INTERSECT stores it in user settings.
+- When a model file's content changes, give the file a new `release_asset_name`. INTERSECT treats a model as installed when a file with that name exists, so a new name is what makes users download the fix.
+- List the model's previous file names in `artifacts.replaces`, and describe the change in one line in `artifacts.update_note`. INTERSECT versions that read them show an UPDATE button instead of DOWNLOAD, keep using the old file until the user updates, and delete it afterwards. Only list a file in `replaces` if it has the same inputs and outputs as the new one. Older plugins ignore both fields and show DOWNLOAD.
+- Only use runtime kinds and fields that plugins in the series already understand. Plugins skip entries they can't parse, and ignore unknown optional fields.
+- Never delete a release, or an asset from one, while any published manifest still points at it. Unchanged models stay in the release where they were first uploaded (SCNet in `v0.2.1`, MVSep Mega 53 in `v0.2.0`).
+- Attach `THIRD_PARTY_LICENSES.txt` to every release that hosts model files, and add an entry for each new model.
+
+`scripts/set_manifest_artifact.py` updates one model's entry (file name, URL, size, SHA-256, patch report, `replaces`, `update_note`).
+
+A manifest change that older plugins in the series would misread needs a new minor series (`v0.3.0`) and a plugin release that reads it.
+
+## DirectML builds
+
+Every model INTERSECT runs on Windows GPUs goes through `scripts/patch_onnx_for_directml.py` and `scripts/validate_directml.py` before it is published. The patch script refuses to write a file whose CPU output isn't bit-identical to the original's. The manifest records each patch under `artifacts.directml_patch`: the source URL and SHA-256, and the rewrites applied with their counts.
+
+What the patch script fixes:
+
+- **DirectML rejects the file** ("80070057 The parameter is incorrect"): `Reshape` nodes with `allowzero=1`, and dead nodes.
+- **DirectML computes wrong values:** its graph fusion turns a GLU (`Split` → `Sigmoid(b)` → `Mul(a, ·)`) into `b·sigmoid(b)`. This is [onnxruntime#32146](https://github.com/microsoft/onnxruntime/issues/32146), open and unfixed in ORT 1.22–1.28. On a real song it made BS-RoFormer SW's stems wrong by more than the stems' own level. The GLU `Split`s are rewritten as `Slice`s.
+- **Windows resets the GPU driver (TDR, `887A0006`):**
+  - **Cause:** DirectML sends each fused part of the graph to the GPU as one job. For BS-RoFormer models that is the whole model, about 5–7 s per chunk on a GTX 745. Windows resets the driver when one job runs longer than about 2 s on GPUs that can't be paused mid-job (NVIDIA GTX 600/700/900).
+  - **Fix:** the script inserts CPU read-back "barriers" so the model runs as many short GPU jobs. Each job stays under 0.5 s on a GTX 745.
+  - **Slow `ConvTranspose`:** DirectML's 1-D `ConvTranspose` (iSTFT) alone took 3 s for one signal, so it is rewritten as MatMul + overlap-add.
+  - The barriers cost about 2–3% on CPU and about 6–12% on CUDA.
+
+`scripts/validate_directml.py` runs on Windows with `onnxruntime-directml`. It checks the following, then writes a JSON report per model:
+
+- The session really runs on DirectML.
+- The output matches the CPU, on random input and, for waveform models, on real-song chunks (`--wav`).
+- No single GPU job exceeds 0.5 s (measured from ORT profiling).
+- Windows logged no GPU timeout: Display 4101, nvlddmkm 153, or LiveKernelEvent 141/117.
+
+Run it on the slowest GPU you support. The reference is a GTX 745, whose compute preemption is `DMA_BUFFER`.
+
 ## Current status
 
 The upstream training config uses a much larger chunk size than is practical for direct ONNX export on modest machines. The exporter therefore defaults to a smaller deployment chunk size of `131072` samples.
