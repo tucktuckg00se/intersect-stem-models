@@ -101,6 +101,7 @@ Rules for a patch release (`v0.2.N`):
 - Only use runtime kinds and fields that plugins in the series already understand. Plugins skip entries they can't parse, and ignore unknown optional fields.
 - Never delete a release, or an asset from one, while any published manifest still points at it. Unchanged models stay in the release where they were first uploaded (SCNet in `v0.2.1`, MVSep Mega 53 in `v0.2.0`).
 - Attach `THIRD_PARTY_LICENSES.txt` to every release that hosts model files, and add an entry for each new model.
+- Create the release as a draft (`gh release create --draft`), upload every asset, then publish it. A published release whose manifest is still uploading makes plugins fall back to the previous manifest and cache it for 6 hours.
 
 `scripts/set_manifest_artifact.py` updates one model's entry (file name, URL, size, SHA-256, patch report, `replaces`, `update_note`).
 
