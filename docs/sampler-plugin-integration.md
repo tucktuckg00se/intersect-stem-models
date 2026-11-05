@@ -123,8 +123,8 @@ What the patch script fixes:
 `scripts/validate_directml.py` runs on Windows with `onnxruntime-directml`. It checks the following, then writes a JSON report per model:
 
 - The session really runs on DirectML.
-- The output matches the CPU, on random input and, for waveform models, on real-song chunks (`--wav`).
-- No single GPU job exceeds 0.5 s (measured from ORT profiling).
+- The output matches the CPU, on random input and, for waveform models, on real-song chunks (`--wav`), within 3e-2 of peak. Normal GPU differences are about 1e-4 (GTX 745) to 1e-2 (Intel UHD); the bugs this catches give errors above 1x.
+- No single GPU job exceeds 0.5 s (measured from ORT profiling), on GPUs that can only be preempted between jobs (DMA_BUFFER or DISPATCH). Elsewhere the job length is informational.
 - Windows logged no GPU timeout: Display 4101, nvlddmkm 153, or LiveKernelEvent 141/117.
 
 Run it on the slowest GPU you support. The reference is a GTX 745, whose compute preemption is `DMA_BUFFER`.

@@ -3,10 +3,13 @@
 For each model it checks, with the session settings INTERSECT uses on Windows:
   * the session really runs on DirectML (ORT's Python API silently falls back to CPU otherwise);
   * DirectML output matches the CPU provider (random input, and real audio chunks for waveform models
-    when --wav is given): max abs diff <= --max-rel-diff x output peak. Normal GPU-vs-CPU rounding in a
-    deep model on real music is ~1e-4 x peak; the bugs this guards against (e.g. onnxruntime#32146)
-    give errors larger than the signal, so the default 1e-3 separates them by orders of magnitude;
-  * the longest single GPU job, from ORT profiling, is <= --max-job seconds. With TDR barriers each job
+    when --wav is given): max abs diff <= --max-rel-diff x output peak. GPUs differ from the CPU by
+    normal rounding: ~1e-4 x peak on real music on an NVIDIA GTX 745, ~1e-2 on an Intel UHD iGPU (same
+    with or without TDR barriers). The bugs this guards against (e.g. onnxruntime#32146) give errors
+    larger than the signal, so the default 3e-2 still separates them by more than 30x;
+  * on GPUs whose compute work can only be preempted between DMA buffers or dispatches (NVIDIA Kepler/
+    Maxwell; the TDR risk), the longest single GPU job is <= --max-job seconds. GPUs with finer
+    preemption can't trip the timeout this way, so there it is reported only. With TDR barriers each job
     ends in a GPU->CPU read-back (MemcpyToHost) whose wait time is the job's GPU time; the last job ends
     in the output read-back after the last node. Without barriers there are no read-backs, so job
     lengths can't be measured and only the TDR check applies;
@@ -249,8 +252,8 @@ def validate(path: Path, args, adapter: GpuAdapter) -> dict:
     })
     checks = {
         "matches_cpu": max(diffs.values()) <= args.max_rel_diff,
-        # No read-backs: the model reaches the GPU as fused partitions we can't time individually.
-        "short_jobs": (max(job, tail) <= args.max_job) if readbacks else None,
+        # Enforced only where one long job can trip the TDR, and only measurable with read-backs.
+        "short_jobs": (max(job, tail) <= args.max_job) if readbacks and adapter.preemption in ("DMA_BUFFER", "DISPATCH") else None,
         "no_tdr": not events,
     }
     result["checks"], result["pass"] = checks, all(v is not False for v in checks.values())
@@ -258,6 +261,8 @@ def validate(path: Path, args, adapter: GpuAdapter) -> dict:
           f"(read-back {job:.3f}s, tail {tail:.3f}s), peak GPU memory {result['peak_gpu_mib']} MiB")
     if not readbacks:
         print("  note: no GPU->CPU read-backs, so single-job lengths can't be measured; relying on the TDR check")
+    elif checks["short_jobs"] is None:
+        print(f"  note: compute preemption {adapter.preemption}: long jobs can't trip the TDR here, job length is informational")
     print(f"  TDR events: {events or 'none'}")
     print(f"  {'PASS' if result['pass'] else 'FAIL'} {checks}")
     return result
@@ -269,7 +274,7 @@ def main() -> int:
     parser.add_argument("--wav", type=Path, help="44.1 kHz 16/24-bit WAV for the real-audio check (waveform models)")
     parser.add_argument("--runs", type=int, default=2, help="GPU runs per input")
     parser.add_argument("--max-job", type=float, default=0.5, help="seconds; longest allowed single GPU job")
-    parser.add_argument("--max-rel-diff", type=float, default=1e-3, help="allowed DML vs CPU max abs diff, x output peak")
+    parser.add_argument("--max-rel-diff", type=float, default=3e-2, help="allowed DML vs CPU max abs diff, x output peak")
     parser.add_argument("--report-dir", type=Path, help="write <model>.validate.json here")
     args = parser.parse_args()
 
