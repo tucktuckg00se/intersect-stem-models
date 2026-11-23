@@ -1,0 +1,9 @@
+# Core ML conversion (scripts/coreml/convert_coreml.py). coremltools 9.0 is tested with torch 2.7.0.
+# pip install -r scripts/coreml/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+coremltools==9.0
+torch==2.7.0
+torchvision==0.22.0
+onnx2torch==1.5.15
+onnx
+onnxruntime
+numpy

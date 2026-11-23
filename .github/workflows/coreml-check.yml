@@ -1,0 +1,60 @@
+name: Core ML conversion check (temporary)
+
+# Proof of concept for native Core ML stem models (INTERSECT issue 63). Lives only on feat/coreml-poc.
+on:
+  push:
+    branches: ['feat/coreml-poc']
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install
+        run: python -m pip install --quiet -r scripts/coreml/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: Sources
+        run: |
+          mkdir -p src-models out
+          # Mini-BS-RoFormer V2.5 at the MIT-licensed revision (later revisions are CC-BY-NC-4.0)
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors -o src-models/mini_upstream.onnx \
+            https://huggingface.co/HiDolen/Mini-BS-RoFormer-V2.5-46.2M/resolve/38dafc78834607aec57d8c0cb3568523f9ea5563/onnx/freq_weights.onnx
+          curl -sSfL --retry 5 -o src-models/scnet.onnx \
+            https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.2.1/scnet_int8_dml.onnx
+          echo "c019650a7fb9e6a208353fead62471ed6ffdf20a3069ddadd8278edeb411d556  src-models/mini_upstream.onnx" | sha256sum -c
+          echo "86c35a1f513de688149d5a36c16a0bb1c67c60dcdfa01563ffda7e73708676db  src-models/scnet.onnx" | sha256sum -c
+      - name: Convert
+        run: |
+          python -W ignore scripts/coreml/convert_coreml.py src-models/mini_upstream.onnx out/mini_bs_roformer_v25.mlpackage 1,690,8196 2>&1 | grep -E '^(input|opset|PyTorch|saved)'
+          python -W ignore scripts/coreml/convert_coreml.py src-models/scnet.onnx out/scnet.mlpackage 1,4,2049,476 2>&1 | grep -E '^(input|opset|PyTorch|saved)'
+          du -sh out/*
+      - uses: actions/upload-artifact@v5
+        with:
+          name: coreml-models
+          path: out/
+
+  verify-macos:
+    needs: convert
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --quiet coremltools==9.0 numpy
+      - uses: actions/download-artifact@v5
+        with:
+          name: coreml-models
+          path: out
+      - name: Verify Core ML against ONNX Runtime
+        run: |
+          sysctl -n machdep.cpu.brand_string hw.ncpu
+          rc=0
+          for m in out/scnet.mlpackage out/mini_bs_roformer_v25.mlpackage; do
+            python -W ignore scripts/coreml/verify_coreml.py "$m" cpu_and_gpu 2>&1 | grep -E '^RESULT|Error|error' || rc=1
+          done
+          exit $rc
