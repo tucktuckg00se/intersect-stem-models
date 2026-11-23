@@ -45,14 +45,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --quiet coremltools==9.0 numpy
+      - run: python -m pip install --quiet coremltools==9.0 numpy onnxruntime==1.24.2
       - uses: actions/download-artifact@v5
         with:
           name: coreml-models
           path: out
+      - name: Machine
+        run: |
+          sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+          sysctl hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu 2>/dev/null || true
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Chipset|Metal|Cores|Vendor' || echo "(no GPU listed)"
+      - name: ONNX Runtime CPU on the same machine (INTERSECT's settings)
+        run: |
+          mkdir -p src-models
+          curl -sSfL --http1.1 --retry 5 --retry-all-errors -o src-models/mini_upstream.onnx \
+            https://huggingface.co/HiDolen/Mini-BS-RoFormer-V2.5-46.2M/resolve/38dafc78834607aec57d8c0cb3568523f9ea5563/onnx/freq_weights.onnx
+          curl -sSfL --retry 5 -o src-models/scnet.onnx https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.2.1/scnet_int8_dml.onnx
+          python - <<'PY'
+          import os, time, numpy as np, onnxruntime as ort
+          for name, path, pkg in (("scnet", "src-models/scnet.onnx", "out/scnet.mlpackage"),
+                                  ("mini", "src-models/mini_upstream.onnx", "out/mini_bs_roformer_v25.mlpackage")):
+              so = ort.SessionOptions(); so.intra_op_num_threads = max(1, os.cpu_count() - 1)
+              so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL; so.log_severity_level = 3
+              s = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+              x = np.load(pkg + ".ref_input.npy")
+              t = []
+              for _ in range(3):
+                  a = time.time(); s.run(None, {s.get_inputs()[0].name: x}); t.append(time.time() - a)
+              print(f"ORT CPU {name}: {min(t):.2f} s per segment ({os.cpu_count()} cores)")
+          PY
       - name: Verify Core ML against ONNX Runtime
         run: |
-          sysctl -n machdep.cpu.brand_string hw.ncpu
           rc=0
           for m in out/scnet.mlpackage out/mini_bs_roformer_v25.mlpackage; do
             python -W ignore scripts/coreml/verify_coreml.py "$m" cpu_and_gpu 2>&1 | grep -E '^RESULT|Error|error' || rc=1

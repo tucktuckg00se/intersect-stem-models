@@ -36,6 +36,20 @@ def fix_scalar_unsqueeze_axes(model):
     return model
 
 
+def reciprocal_to_div(model):
+    """Reciprocal(x) -> Div(1, x). coremltools maps a reciprocal to MIL `inverse`, which adds epsilon 1e-4."""
+    g = model.graph
+    count = 0
+    for n in g.node:
+        if n.op_type == "Reciprocal":
+            one = n.name + "__one" if n.name else f"__reciprocal_one_{count}"
+            g.initializer.append(numpy_helper.from_array(np.array(1.0, dtype=np.float32), one))
+            n.op_type = "Div"
+            n.input.insert(0, one)
+            count += 1
+    return count
+
+
 REDUCE_OPS = {"ReduceMean", "ReduceMax", "ReduceMin", "ReduceProd", "ReduceL1", "ReduceL2",
               "ReduceLogSum", "ReduceLogSumExp", "ReduceSumSquare"}   # ReduceSum already takes axes as an input in 13
 
@@ -117,6 +131,12 @@ def main():
         print(f"opset {opset} -> 17 rewrite vs original: {'bit-identical' if np.array_equal(ref, y17) else f'SNR {snr_db(ref, y17):.1f} dB'}")
     for i, n in enumerate(model.graph.node):   # node names become module names: avoid clashes like "to"
         n.name = f"n{i}_{n.op_type}"
+    converted = reciprocal_to_div(model)
+    if converted:
+        rdiv = os.path.join(work, "rdiv.onnx")
+        onnx.save(model, rdiv)
+        yr = ort.InferenceSession(rdiv, plain, providers=["CPUExecutionProvider"]).run(None, {in_name: x})[0]
+        print(f"{converted} Reciprocal -> Div(1, x) vs original: SNR {snr_db(ref, yr):.1f} dB")
     torch_model = convert(model).eval()
     with torch.no_grad():
         y = torch_model(torch.from_numpy(x))
