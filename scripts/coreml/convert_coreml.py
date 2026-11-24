@@ -3,9 +3,13 @@
 Route: ONNX -> constant folding (ONNX Runtime, basic level: standard ONNX only) -> PyTorch (onnx2torch)
 -> torch.jit.trace -> coremltools. Checks the PyTorch copy against ONNX Runtime before converting.
 
-usage: python convert_coreml.py <model.onnx> <out.mlpackage> <input shape, e.g. 1,690,8196>
+usage: python convert_coreml.py <model.onnx> <out.mlpackage> <input shape, e.g. 1,690,8196> [--no-step-checks]
+
+--no-step-checks skips the ONNX Runtime run after each graph rewrite (each one is a full inference); the
+final PyTorch-vs-ONNX Runtime check still covers them all. Use it for the big models (MVSep Mega 53).
+Only one model copy is alive at a time, and the work folder follows TMPDIR: point it at a disk.
 """
-import os, sys, tempfile
+import atexit, gc, os, shutil, sys, tempfile
 import numpy as np
 import onnx
 import onnxruntime as ort
@@ -15,6 +19,8 @@ from onnx import numpy_helper
 from onnx2torch import convert
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import onnx2torch_lstm  # noqa: F401  (registers the LSTM converter)
+import onnx2torch_stft  # noqa: F401  (registers the STFT converter)
+from fp16_weights import PASS_NAME as FP16_EXACT_WEIGHTS, put_back_weights, take_fp16_weights
 
 
 def snr_db(ref, test):
@@ -34,6 +40,17 @@ def fix_scalar_unsqueeze_axes(model):
                 g.initializer.append(made[name])
             n.input[1] = name
     return model
+
+
+def drop_trailing_empty_inputs(model):
+    """Removes unused optional inputs at the end of a node ("" names, e.g. Clip with only a min): onnx2torch
+    looks "" up as a constant and fails. ONNX treats a missing trailing input and "" the same."""
+    count = 0
+    for n in model.graph.node:
+        while len(n.input) and n.input[-1] == "":
+            n.input.pop()
+            count += 1
+    return count
 
 
 def reciprocal_to_div(model):
@@ -103,48 +120,91 @@ def downgrade_to_opset17(model):
     return model
 
 
+def run_onnx(path, in_name, x):
+    so = ort.SessionOptions()
+    so.log_severity_level = 3
+    so.enable_cpu_mem_arena = False   # the arena holds on to the peak; these are one-off runs
+    session = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+    y = session.run(None, {in_name: x})[0]
+    del session
+    gc.collect()
+    return y
+
+
 def main():
-    src, out, shape = sys.argv[1], sys.argv[2], [int(v) for v in sys.argv[3].split(",")]
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    step_checks = "--no-step-checks" not in sys.argv
+    src, out, shape = args[0], args[1], [int(v) for v in args[2].split(",")]
     work = tempfile.mkdtemp(prefix="coreml-convert-")
+    atexit.register(shutil.rmtree, work, True)   # it holds full model copies
     folded = os.path.join(work, "folded.onnx")
 
+    probe = ort.InferenceSession(src, providers=["CPUExecutionProvider"])
+    in_name, out_name = probe.get_inputs()[0].name, probe.get_outputs()[0].name
+    del probe
+    gc.collect()
+    x = (np.random.default_rng(63).standard_normal(shape) * 0.1).astype(np.float32)
+    ref = run_onnx(src, in_name, x)
+    print(f"input {in_name} {shape}, output {out_name} {list(ref.shape)}", flush=True)
+
+    # Constant folding (ONNX Runtime, basic level), with fp16 weights kept out of it (see fp16_weights.py).
+    source = onnx.load(src)
+    hidden = take_fp16_weights(source)
+    fold_input = src
+    if hidden:
+        fold_input = os.path.join(work, "without_fp16_weights.onnx")
+        onnx.save(source, fold_input)
+        print(f"{len(hidden)} fp16 weights kept out of constant folding", flush=True)
+    del source
+    gc.collect()
     so = ort.SessionOptions()
     so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
     so.optimized_model_filepath = folded
     so.log_severity_level = 3
-    ref_session = ort.InferenceSession(src, so, providers=["CPUExecutionProvider"])
-    in_name = ref_session.get_inputs()[0].name
-    out_name = ref_session.get_outputs()[0].name
-
-    x = (np.random.default_rng(63).standard_normal(shape) * 0.1).astype(np.float32)
-    plain = ort.SessionOptions(); plain.log_severity_level = 3
-    ref = ort.InferenceSession(src, plain, providers=["CPUExecutionProvider"]).run(None, {in_name: x})[0]
-    print(f"input {in_name} {shape}, output {out_name} {list(ref.shape)}")
-
-    model = fix_scalar_unsqueeze_axes(onnx.load(folded))
+    ort.InferenceSession(fold_input, so, providers=["CPUExecutionProvider"])   # writes folded.onnx
+    model = onnx.load(folded)
+    if hidden:
+        put_back_weights(model, hidden)
+        del hidden
+        gc.collect()
+    model = fix_scalar_unsqueeze_axes(model)
     opset = next(o.version for o in model.opset_import if o.domain in ("", "ai.onnx"))
     if opset > 17 or any(n.op_type == "Reshape" for n in model.graph.node):   # opset-18 forms, allowzero
         model = downgrade_to_opset17(model)
-        down = os.path.join(work, "opset17.onnx")
-        onnx.save(model, down)
-        y17 = ort.InferenceSession(down, plain, providers=["CPUExecutionProvider"]).run(None, {in_name: x})[0]
-        print(f"opset {opset} -> 17 rewrite vs original: {'bit-identical' if np.array_equal(ref, y17) else f'SNR {snr_db(ref, y17):.1f} dB'}")
+        if step_checks:
+            down = os.path.join(work, "opset17.onnx")
+            onnx.save(model, down)
+            y17 = run_onnx(down, in_name, x)
+            print(f"opset {opset} -> 17 rewrite vs original: {'bit-identical' if np.array_equal(ref, y17) else f'SNR {snr_db(ref, y17):.1f} dB'}", flush=True)
+            del y17
     for i, n in enumerate(model.graph.node):   # node names become module names: avoid clashes like "to"
         n.name = f"n{i}_{n.op_type}"
+    dropped = drop_trailing_empty_inputs(model)
+    if dropped:
+        print(f"dropped {dropped} unused trailing optional inputs", flush=True)
     converted = reciprocal_to_div(model)
-    if converted:
+    if converted and step_checks:
         rdiv = os.path.join(work, "rdiv.onnx")
         onnx.save(model, rdiv)
-        yr = ort.InferenceSession(rdiv, plain, providers=["CPUExecutionProvider"]).run(None, {in_name: x})[0]
-        print(f"{converted} Reciprocal -> Div(1, x) vs original: SNR {snr_db(ref, yr):.1f} dB")
+        yr = run_onnx(rdiv, in_name, x)
+        print(f"{converted} Reciprocal -> Div(1, x) vs original: SNR {snr_db(ref, yr):.1f} dB", flush=True)
+        del yr
     torch_model = convert(model).eval()
+    del model
+    gc.collect()
     with torch.no_grad():
         y = torch_model(torch.from_numpy(x))
     y = (y[0] if isinstance(y, (tuple, list)) else y).numpy()
-    print(f"PyTorch copy vs ONNX Runtime: SNR {snr_db(ref, y):.1f} dB, max abs error {np.abs(ref - y).max():.2e}")
+    print(f"PyTorch copy vs ONNX Runtime: SNR {snr_db(ref, y):.1f} dB, max abs error {np.abs(ref - y).max():.2e}", flush=True)
+    del y
+    gc.collect()
 
     with torch.no_grad():
         traced = torch.jit.trace(torch_model, torch.from_numpy(x), check_trace=False)
+    del torch_model
+    gc.collect()
+    pipeline = ct.PassPipeline.DEFAULT
+    pipeline.append_pass(FP16_EXACT_WEIGHTS)   # last: fp16-valued weights stay fp16 in the package
     mlmodel = ct.convert(
         traced,
         inputs=[ct.TensorType(name=in_name, shape=shape, dtype=np.float32)],
@@ -153,6 +213,7 @@ def main():
         compute_precision=ct.precision.FLOAT32,
         compute_units=ct.ComputeUnit.CPU_AND_GPU,
         minimum_deployment_target=ct.target.macOS13,
+        pass_pipeline=pipeline,
     )
     mlmodel.short_description = os.path.basename(src) + " (fp32 ML Program, converted from ONNX)"
     mlmodel.save(out)

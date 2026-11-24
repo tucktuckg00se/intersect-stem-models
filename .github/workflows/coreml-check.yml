@@ -1,6 +1,8 @@
 name: Core ML conversion check (temporary)
 
-# Proof of concept for native Core ML stem models (INTERSECT issue 63). Lives only on feat/coreml-poc.
+# Native Core ML stem models for INTERSECT on Macs (issue 63). Lives only on feat/coreml-poc and is removed
+# before merging. Mini-BS-RoFormer and SCNet were checked and published in v0.2.3; this run covers
+# BS-RoFormer SW and MVSep Mega 53.
 on:
   push:
     branches: ['feat/coreml-poc']
@@ -8,7 +10,7 @@ on:
 jobs:
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -16,36 +18,45 @@ jobs:
           python-version: '3.12'
       - name: Install
         run: python -m pip install --quiet -r scripts/coreml/requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
-      - name: Sources
+      - name: Sources (the exact ONNX files INTERSECT runs)
         run: |
-          mkdir -p src-models out
-          # Mini-BS-RoFormer V2.5 at the MIT-licensed revision (later revisions are CC-BY-NC-4.0)
-          curl -sSfL --http1.1 --retry 5 --retry-all-errors -o src-models/mini_upstream.onnx \
-            https://huggingface.co/HiDolen/Mini-BS-RoFormer-V2.5-46.2M/resolve/38dafc78834607aec57d8c0cb3568523f9ea5563/onnx/freq_weights.onnx
-          curl -sSfL --retry 5 -o src-models/scnet.onnx \
-            https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.2.1/scnet_int8_dml.onnx
-          echo "c019650a7fb9e6a208353fead62471ed6ffdf20a3069ddadd8278edeb411d556  src-models/mini_upstream.onnx" | sha256sum -c
-          echo "86c35a1f513de688149d5a36c16a0bb1c67c60dcdfa01563ffda7e73708676db  src-models/scnet.onnx" | sha256sum -c
+          mkdir -p src-models out work
+          curl -sSfL --retry 5 -o src-models/sw.onnx https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.1.0/bs_roformer_sw_6stem.onnx
+          curl -sSfL --retry 5 -o src-models/mega.onnx https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.2.0/mvsep_mega_53.onnx
+          echo "718c3304a4a051bc8b1adfa776ce0aeab54165e207d0a5f5890d683c16188e5e  src-models/sw.onnx" | sha256sum -c
+          echo "d3b1c838303a44cffdb7358c536ec99ebf8ded1f1c34075144c413839b40101a  src-models/mega.onnx" | sha256sum -c
+          free -g; df -h .
       - name: Convert
+        env:
+          TMPDIR: ${{ github.workspace }}/work
         run: |
-          python -W ignore scripts/coreml/convert_coreml.py src-models/mini_upstream.onnx out/mini_bs_roformer_v25.mlpackage 1,690,8196 2>&1 | grep -E '^(input|opset|PyTorch|saved)'
-          python -W ignore scripts/coreml/convert_coreml.py src-models/scnet.onnx out/scnet.mlpackage 1,4,2049,476 2>&1 | grep -E '^(input|opset|PyTorch|saved)'
+          set -o pipefail
+          show='^(input|dropped|[0-9]+ fp16|PyTorch|saved)'
+          python -W ignore -u scripts/coreml/convert_coreml.py src-models/sw.onnx out/bs_roformer_sw_6stem.mlpackage 1,2,131072 --no-step-checks 2>&1 | grep -E "$show" | cut -c1-200
+          python -W ignore -u scripts/coreml/convert_coreml.py src-models/mega.onnx out/mvsep_mega_53.mlpackage 1,2,131072 --no-step-checks 2>&1 | grep -E "$show" | cut -c1-200
           du -sh out/*
       - uses: actions/upload-artifact@v5
         with:
           name: coreml-models
           path: out/
+          compression-level: 1
 
   verify-macos:
     needs: convert
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: tucktuckg00se/INTERSECT
+          ref: fix/macos-stem-speed
+          path: plugin
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --quiet coremltools==9.0 numpy onnxruntime==1.24.2
+      - run: python -m pip install --quiet coremltools==9.0 numpy
       - uses: actions/download-artifact@v5
         with:
           name: coreml-models
@@ -53,31 +64,69 @@ jobs:
       - name: Machine
         run: |
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
-          sysctl hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu 2>/dev/null || true
           system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Chipset|Metal|Cores|Vendor' || echo "(no GPU listed)"
-      - name: ONNX Runtime CPU on the same machine (INTERSECT's settings)
-        run: |
-          mkdir -p src-models
-          curl -sSfL --http1.1 --retry 5 --retry-all-errors -o src-models/mini_upstream.onnx \
-            https://huggingface.co/HiDolen/Mini-BS-RoFormer-V2.5-46.2M/resolve/38dafc78834607aec57d8c0cb3568523f9ea5563/onnx/freq_weights.onnx
-          curl -sSfL --retry 5 -o src-models/scnet.onnx https://github.com/tucktuckg00se/intersect-stem-models/releases/download/v0.2.1/scnet_int8_dml.onnx
-          python - <<'PY'
-          import os, time, numpy as np, onnxruntime as ort
-          for name, path, pkg in (("scnet", "src-models/scnet.onnx", "out/scnet.mlpackage"),
-                                  ("mini", "src-models/mini_upstream.onnx", "out/mini_bs_roformer_v25.mlpackage")):
-              so = ort.SessionOptions(); so.intra_op_num_threads = max(1, os.cpu_count() - 1)
-              so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL; so.log_severity_level = 3
-              s = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
-              x = np.load(pkg + ".ref_input.npy")
-              t = []
-              for _ in range(3):
-                  a = time.time(); s.run(None, {s.get_inputs()[0].name: x}); t.append(time.time() - a)
-              print(f"ORT CPU {name}: {min(t):.2f} s per segment ({os.cpu_count()} cores)")
-          PY
-      - name: Verify Core ML against ONNX Runtime
+          df -h ~
+      - name: Core ML against ONNX Runtime (reference saved by the converter)
         run: |
           rc=0
-          for m in out/scnet.mlpackage out/mini_bs_roformer_v25.mlpackage; do
+          for m in out/bs_roformer_sw_6stem.mlpackage out/mvsep_mega_53.mlpackage; do
             python -W ignore scripts/coreml/verify_coreml.py "$m" cpu_and_gpu 2>&1 | grep -E '^RESULT|Error|error' || rc=1
           done
           exit $rc
+      # github.com/microsoft/onnxruntime returned 404 in Nov 2026: same 1.24.2 headers from intersect-tools.
+      - name: Build the plugin's stem bench
+        working-directory: plugin
+        run: |
+          curl -sSfL -o ort.zip https://github.com/tucktuckg00se/intersect-tools/releases/download/ort-1.24.2/onnxruntime-macos-arm64.zip
+          mkdir ort && unzip -q ort.zip -d ort
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DINTERSECT_BUILD_TESTS=ON -DINTERSECT_ORT_HEADERS_ROOT=$PWD/ort
+          cmake --build build --config Release --target IntersectStemBench -j4
+      - name: CPU (ONNX Runtime) vs GPU (Core ML) through the plugin's stem job
+        run: |
+          B=$(find plugin/build -name IntersectStemBench -type f -perm -u+x | head -1)
+          M=~/Library/INTERSECT/models
+          run () { echo "::group::$*"; "$B" "$@" timeout=2400 2>&1 | tee -a bench.log | grep -v '^  \[' ; echo "::endgroup::"; }
+          run bs-roformer-sw-6stem cpu gen:20 out-sw-cpu
+          # What a release manifest's artifacts.coreml does: point the cached manifest at the packages.
+          python - "$M/intersect_stem_models_manifest-v0.2.json" <<'PY'
+          import json, sys
+          p = sys.argv[1]; m = json.load(open(p))
+          for e in m["models"]:
+              pkg = {"bs-roformer-sw-6stem": "bs_roformer_sw_6stem.mlpackage", "mvsep-mega-53": "mvsep_mega_53.mlpackage"}.get(e["model_id"])
+              if pkg:
+                  e["artifacts"]["coreml"] = {"release_asset_name": pkg.replace(".mlpackage", "_coreml.zip"),
+                                              "release_asset_url": "https://example.invalid/" + pkg, "package_name": pkg}
+          json.dump(m, open(p, "w"), indent=1)
+          PY
+          cp -R out/bs_roformer_sw_6stem.mlpackage "$M/"
+          run bs-roformer-sw-6stem gpu gen:20 out-sw-coreml-cold
+          run bs-roformer-sw-6stem gpu gen:20 out-sw-coreml
+          rm -rf out/bs_roformer_sw_6stem.mlpackage
+          run mvsep-mega-53 cpu gen:10 out-mega-cpu
+          cp -R out/mvsep_mega_53.mlpackage "$M/"
+          rm -rf out/mvsep_mega_53.mlpackage
+          run mvsep-mega-53 gpu gen:10 out-mega-coreml-cold
+          run mvsep-mega-53 gpu gen:10 out-mega-coreml
+          python - <<'PY'
+          import os, wave, numpy as np
+          def read(p):
+              with wave.open(p) as w:
+                  raw = np.frombuffer(w.readframes(w.getnframes()), dtype=np.uint8).reshape(-1, 3)
+              v = raw[:, 0].astype(np.int32) | (raw[:, 1].astype(np.int32) << 8) | (raw[:, 2].astype(np.int32) << 16)
+              return np.where(v >= 1 << 23, v - (1 << 24), v) / float(1 << 23)
+          for gpu, cpu in (("out-sw-coreml", "out-sw-cpu"), ("out-mega-coreml", "out-mega-cpu")):
+              if not (os.path.isdir(gpu) and os.path.isdir(cpu)):
+                  print(f"{gpu} vs {cpu}: missing"); continue
+              print(f"{gpu} vs {cpu}:")
+              worst = None
+              for f in sorted(os.listdir(cpu)):
+                  a, b = read(os.path.join(gpu, f)), read(os.path.join(cpu, f))
+                  n = min(len(a), len(b)); e = a[:n] - b[:n]
+                  energy = (b[:n] ** 2).sum()
+                  snr = 10 * np.log10(energy / max((e ** 2).sum(), 1e-30)) if energy > 0 else float("inf")
+                  worst = snr if worst is None else min(worst, snr)
+                  print(f"  {f}: SNR {snr:.1f} dB, max error {np.abs(e).max():.1e}")
+              print(f"  worst stem: {worst:.1f} dB")
+          PY
+          echo "---- stem log"; grep -E -- '----|Core ML|done|FAILED' ~/Library/INTERSECT/logs/stem-separation.log | tail -20
+          { echo '```'; grep '^RESULT' bench.log; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
