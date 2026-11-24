@@ -130,6 +130,16 @@ What the patch script fixes:
 
 Run it on the slowest GPU you support. The reference is a GTX 745, whose compute preemption is `DMA_BUFFER`.
 
+## Core ML builds
+
+On Macs, INTERSECT 0.20.1 and later run a model's native Core ML version when `DEVICE` is GPU. It downloads with the model, and a model installed without it shows UPDATE. Older plugins and other platforms ignore it.
+
+- `scripts/coreml/convert_coreml.py` converts the published ONNX file to an fp32 ML Program for macOS 13 and later, with the same inputs and outputs. The route is ONNX → PyTorch (onnx2torch, plus the LSTM and STFT converters in `scripts/coreml/`) → coremltools. Weights that are exactly representable in fp16 are stored as fp16, which loses nothing. The script checks the PyTorch copy against ONNX Runtime before converting, and saves a reference input and output next to the package. Install `scripts/coreml/requirements.txt` first. For MVSep Mega 53, pass `--no-step-checks` and point `TMPDIR` at a disk.
+- `scripts/coreml/verify_coreml.py` runs on a Mac. It compares the package against that reference, fails below 60 dB, and times it.
+- `scripts/coreml/set_manifest_coreml.py` zips the package and sets `artifacts.coreml` on the model: the zip's name, URL, size and SHA-256, the package name, the ONNX file it was converted from, and the measured fidelity.
+
+The zip follows the release rules above, like a model file: it stays in the release that first hosted it.
+
 ## Current status
 
 The upstream training config uses a much larger chunk size than is practical for direct ONNX export on modest machines. The exporter therefore defaults to a smaller deployment chunk size of `131072` samples.
