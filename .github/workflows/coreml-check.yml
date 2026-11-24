@@ -86,25 +86,27 @@ jobs:
           B=$(find plugin/build -name IntersectStemBench -type f -perm -u+x | head -1)
           M=~/Library/INTERSECT/models
           run () { echo "::group::$*"; "$B" "$@" timeout=2400 2>&1 | tee -a bench.log | grep -v '^  \[' ; echo "::endgroup::"; }
-          run bs-roformer-sw-6stem cpu gen:20 out-sw-cpu
-          # What a release manifest's artifacts.coreml does: point the cached manifest at the packages.
-          python - "$M/intersect_stem_models_manifest-v0.2.json" <<'PY'
+          # What a release manifest's artifacts.coreml does: point the cached manifest at a package. Done right
+          # before each GPU run, because a model download (the CPU runs) fetches the release manifest again.
+          seed () {
+            python - "$M/intersect_stem_models_manifest-v0.2.json" "$1" "$2" <<'PY'
           import json, sys
-          p = sys.argv[1]; m = json.load(open(p))
+          path, model_id, pkg = sys.argv[1:]
+          m = json.load(open(path))
           for e in m["models"]:
-              pkg = {"bs-roformer-sw-6stem": "bs_roformer_sw_6stem.mlpackage", "mvsep-mega-53": "mvsep_mega_53.mlpackage"}.get(e["model_id"])
-              if pkg:
+              if e["model_id"] == model_id:
                   e["artifacts"]["coreml"] = {"release_asset_name": pkg.replace(".mlpackage", "_coreml.zip"),
                                               "release_asset_url": "https://example.invalid/" + pkg, "package_name": pkg}
-          json.dump(m, open(p, "w"), indent=1)
+          json.dump(m, open(path, "w"), indent=1)
           PY
-          cp -R out/bs_roformer_sw_6stem.mlpackage "$M/"
+            cp -R "out/$2" "$M/" && rm -rf "out/$2"
+          }
+          run bs-roformer-sw-6stem cpu gen:20 out-sw-cpu
+          seed bs-roformer-sw-6stem bs_roformer_sw_6stem.mlpackage
           run bs-roformer-sw-6stem gpu gen:20 out-sw-coreml-cold
           run bs-roformer-sw-6stem gpu gen:20 out-sw-coreml
-          rm -rf out/bs_roformer_sw_6stem.mlpackage
           run mvsep-mega-53 cpu gen:10 out-mega-cpu
-          cp -R out/mvsep_mega_53.mlpackage "$M/"
-          rm -rf out/mvsep_mega_53.mlpackage
+          seed mvsep-mega-53 mvsep_mega_53.mlpackage
           run mvsep-mega-53 gpu gen:10 out-mega-coreml-cold
           run mvsep-mega-53 gpu gen:10 out-mega-coreml
           python - <<'PY'
@@ -115,8 +117,8 @@ jobs:
               v = raw[:, 0].astype(np.int32) | (raw[:, 1].astype(np.int32) << 8) | (raw[:, 2].astype(np.int32) << 16)
               return np.where(v >= 1 << 23, v - (1 << 24), v) / float(1 << 23)
           for gpu, cpu in (("out-sw-coreml", "out-sw-cpu"), ("out-mega-coreml", "out-mega-cpu")):
-              if not (os.path.isdir(gpu) and os.path.isdir(cpu)):
-                  print(f"{gpu} vs {cpu}: missing"); continue
+              if not (os.path.isdir(gpu) and os.path.isdir(cpu)) or sorted(os.listdir(gpu)) != sorted(os.listdir(cpu)):
+                  print(f"{gpu} vs {cpu}: stems missing"); continue
               print(f"{gpu} vs {cpu}:")
               worst = None
               for f in sorted(os.listdir(cpu)):
