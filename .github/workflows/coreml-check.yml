@@ -32,7 +32,16 @@ jobs:
         run: |
           B=$(find plugin/build -name IntersectStemBench -type f -perm -u+x | head -1)
           M=~/Library/INTERSECT/models
-          run () { echo "::group::$*"; "$B" "$@" timeout=2400 2>&1 | tee -a bench.log | grep -v '^  \[' ; echo "::endgroup::"; }
+          # The plugin finds the newest v0.2.x manifest through GitHub's API (unauthenticated, 60 an hour per IP)
+          # and falls back to v0.2.1's when that fails. Show what's left before each run, and what got cached.
+          api () { curl -s https://api.github.com/rate_limit | python3 -c 'import json,sys; r=json.load(sys.stdin)["resources"]["core"]; print("GitHub API left for this runner:", r["remaining"], "of", r["limit"])' || true; }
+          cached () { python3 - "$M/intersect_stem_models_manifest-v0.2.json" <<'PY2' || true
+          import json, sys
+          m = json.load(open(sys.argv[1]))
+          print("cached manifest Core ML:", {e["model_id"]: bool(e.get("artifacts", {}).get("coreml")) for e in m["models"]})
+          PY2
+          }
+          run () { api; echo "::group::$*"; "$B" "$@" timeout=2400 2>&1 | tee -a bench.log | grep -v '^  \[' ; echo "::endgroup::"; cached; }
           expect () { grep -qF -- "$1" bench.log && echo "ok: $1" || { echo "::error::missing: $1"; fail=1; }; }
           fail=0
 
@@ -47,7 +56,7 @@ jobs:
           : > bench.log
           run bs-roformer-sw-6stem gpu gen:20 out-sw-gpu
           expect "Model bs-roformer-sw-6stem: Model download complete"
-          expect "BS RoFormer SW by jarredou (bs_roformer_sw_6stem.onnx) on GPU (Core ML, bs_roformer_sw_6stem.mlpackage)"
+          expect "BS RoFormer SW by jarredou (bs_roformer_sw_6stem_dml.onnx) on GPU (Core ML, bs_roformer_sw_6stem.mlpackage)"
           expect "RESULT model=bs-roformer-sw-6stem device=gpu status=ok"
 
           ls -la "$M"
