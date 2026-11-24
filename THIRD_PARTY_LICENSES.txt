@@ -1,9 +1,10 @@
 Third-party licenses for the models distributed in intersect-stem-models releases
 ==================================================================================
 
-The ONNX files attached to this repository's releases are exports or modified
-copies of models by other authors. Each is distributed under the MIT License
-below, with the copyright notice of its authors.
+The ONNX files and Core ML packages attached to this repository's releases are
+exports, modified copies or conversions of models by other authors. Each is
+distributed under the MIT License below, with the copyright notice of its
+authors.
 
   File                              Release  Authors / source
   --------------------------------  -------  ---------------------------------------------
@@ -29,16 +30,29 @@ below, with the copyright notice of its authors.
   mini_bs_roformer_v25_dml2.onnx    v0.2.2   Mini-BS-RoFormer V2.5 by HiDolen (as above),
                                              modified by intersect-stem-models for DirectML
                                              (scripts/patch_onnx_for_directml.py).
+  mini_bs_roformer_v25_coreml.zip   v0.2.3   Mini-BS-RoFormer V2.5 by HiDolen (as above, revision
+                                             38dafc7), converted to Core ML by intersect-stem-models
+                                             (scripts/coreml/convert_coreml.py).
+  scnet_coreml.zip                  v0.2.3   scnet_int8_dml.onnx (above), converted to Core ML by
+                                             intersect-stem-models (scripts/coreml/convert_coreml.py).
+  bs_roformer_sw_6stem_coreml.zip   v0.2.4   bs_roformer_sw_6stem.onnx (above), converted to Core ML
+                                             by intersect-stem-models (scripts/coreml/convert_coreml.py).
+  mvsep_mega_53_coreml.zip          v0.2.4   mvsep_mega_53.onnx (above), converted to Core ML by
+                                             intersect-stem-models (scripts/coreml/convert_coreml.py).
 
 Copyright notices
 -----------------
 
-  bs_roformer_sw_6stem.onnx      Copyright (c) jarredou
-  mvsep_mega_53.onnx             Copyright (c) 2024 Roman Solovyev (ZFTurbo)
-  scnet_int8_dml.onnx            Copyright (c) 2024 starrytong
-  mini_bs_roformer_v25_dml.onnx  Copyright (c) HiDolen
-  bs_roformer_sw_6stem_dml.onnx  Copyright (c) jarredou
-  mini_bs_roformer_v25_dml2.onnx Copyright (c) HiDolen
+  bs_roformer_sw_6stem.onnx        Copyright (c) jarredou
+  mvsep_mega_53.onnx               Copyright (c) 2024 Roman Solovyev (ZFTurbo)
+  scnet_int8_dml.onnx              Copyright (c) 2024 starrytong
+  mini_bs_roformer_v25_dml.onnx    Copyright (c) HiDolen
+  bs_roformer_sw_6stem_dml.onnx    Copyright (c) jarredou
+  mini_bs_roformer_v25_dml2.onnx   Copyright (c) HiDolen
+  mini_bs_roformer_v25_coreml.zip  Copyright (c) HiDolen
+  scnet_coreml.zip                 Copyright (c) 2024 starrytong
+  bs_roformer_sw_6stem_coreml.zip  Copyright (c) jarredou
+  mvsep_mega_53_coreml.zip         Copyright (c) 2024 Roman Solovyev (ZFTurbo)
 
 ZFTurbo notes in issue #245 that he does not hold the copyright to all of the
 audio the Mega 53 model was trained on.
